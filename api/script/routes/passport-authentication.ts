@@ -333,7 +333,7 @@ export class PassportAuthentication {
       this._cookieSessionMiddleware,
       passport.authenticate(strategyName, { failureRedirect: "/auth/login/" + providerName, session: false }),
       (req: Request, res: Response, next: (err?: any) => void): any => {
-        const action: string = req.session["action"];
+        let action: string = req.session["action"];
         const hostname: string = req.session["hostname"];
         const user: passport.Profile = req.user;
 
@@ -433,18 +433,17 @@ export class PassportAuthentication {
 
               switch (action) {
                 case "login":
-                  const message: string = PassportAuthentication.isAccountRegistrationEnabled()
-                    ? "Account not found.<br/>Have you registered with the CLI?<br/>If you are registered but your email address has changed, please contact us."
-                    : "Account not found.<br/>Please <a href='http://microsoft.github.io/code-push/'>sign up for the beta</a>, and we will contact you when your account has been created!</a>";
-                  restErrorUtils.sendForbiddenPage(res, message);
-                  return;
-                case "link":
-                  restErrorUtils.sendForbiddenPage(
-                    res,
-                    "We weren't able to link your account, because the primary email address registered with your provider does not match the one on your CodePush account." +
-                    "<br/>Please use a matching email address, or contact us if you'd like to change the email address on your CodePush account."
-                  );
-                  return;
+                  // JIT provisioning: a trusted IdP already vetted this
+                  // identity, so a missing local account means first login —
+                  // fall through to register instead of erroring.
+                  if (!PassportAuthentication.isAccountRegistrationEnabled()) {
+                    restErrorUtils.sendForbiddenPage(
+                      res,
+                      "Account not found.<br/>Please <a href='http://microsoft.github.io/code-push/'>sign up for the beta</a>, and we will contact you when your account has been created!</a>"
+                    );
+                    return;
+                  }
+                  action = "register";
                 case "register":
                   const newUser: storage.Account = {
                     createdTime: new Date().getTime(),
@@ -459,6 +458,13 @@ export class PassportAuthentication {
                     error.message = `Unexpected failure with action ${action}, provider ${providerName}, email ${emailAddress}, and message: ${error.message}`;
                     restErrorUtils.sendUnknownError(res, error, next);
                   });
+                  return;
+                case "link":
+                  restErrorUtils.sendForbiddenPage(
+                    res,
+                    "We weren't able to link your account, because the primary email address registered with your provider does not match the one on your CodePush account." +
+                    "<br/>Please use a matching email address, or contact us if you'd like to change the email address on your CodePush account."
+                  );
                   return;
                 default:
                   restErrorUtils.sendUnknownError(res, new Error(`Unrecognized action (${action})`), next);
