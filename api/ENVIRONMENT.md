@@ -19,9 +19,25 @@ To emulate Azure Blob Storage locally. Azurite needs to be installed and running
 - `AZURE_STORAGE_ACCOUNT`: The name of your hosted Azure storage instance
 - `AZURE_STORAGE_ACCESS_KEY`: The key to your Azure storage instance (if KeyVault credentials are not provided)
 
+#### Connection string
+
+- `AZURE_STORAGE_CONNECTION_STRING`: A full Azure Storage connection string. When set, it takes precedence over `EMULATED` and the account/key settings. Use this to point the server at an Azurite instance running on another host/container, e.g. `DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=<dev key>;BlobEndpoint=http://azurite:10000/devstoreaccount1;QueueEndpoint=http://azurite:10001/devstoreaccount1;TableEndpoint=http://azurite:10002/devstoreaccount1;`
+
 ### Authentication
 
 - `SERVER_URL`: The URL of your server, for local deployment it will be either http://localhost:3000 or https://localhost:8443. For Azure it will be your Azure App URL
+- `AUTH_PROVIDER`: Set to `sso` to replace the built-in interactive providers (GitHub/Microsoft) with a single generic OIDC provider. Any other value (or unset) keeps the default behavior described below.
+
+#### Generic OIDC SSO (`AUTH_PROVIDER=sso`)
+
+Requires an issuer that supports `authorization_code` with PKCE S256 and publishes a standard discovery document.
+
+- `OIDC_ISSUER`: The issuer URL, e.g. `https://sso.example.com` (must expose `/.well-known/openid-configuration` reachable from this server)
+- `OIDC_CLIENT_ID`: The client ID registered at the issuer
+- `OIDC_CLIENT_SECRET`: The client secret registered at the issuer
+- `OIDC_REDIRECT_URI` (Optional): The redirect URI registered at the issuer. Defaults to `{SERVER_URL}/auth/callback/sso`
+
+Accounts created through this provider are linked on the `ssoId` field, storing the external identity `sso:{sub}`.
 
 #### GitHub OAuth
 

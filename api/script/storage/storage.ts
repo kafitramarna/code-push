@@ -42,6 +42,7 @@ export interface Account {
   /*generated*/ id?: string;
   microsoftId?: string;
   /*const*/ name: string;
+  ssoId?: string;
 }
 
 export interface CollaboratorProperties {

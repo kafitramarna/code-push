@@ -3,6 +3,7 @@
 
 import * as cookieSession from "cookie-session";
 import { Request, Response, Router, RequestHandler } from "express";
+import { Issuer, Strategy as OpenIdClientStrategy, TokenSet } from "openid-client";
 import * as passport from "passport";
 const passportActiveDirectory = require("passport-azure-ad");
 import * as passportBearer from "passport-http-bearer";
@@ -39,6 +40,7 @@ export class PassportAuthentication {
   private static AZURE_AD_PROVIDER_NAME = "azure-ad";
   private static GITHUB_PROVIDER_NAME = "github";
   private static MICROSOFT_PROVIDER_NAME = "microsoft";
+  private static SSO_PROVIDER_NAME = "sso";
 
   private _cookieSessionMiddleware: RequestHandler;
   private _serverUrl: string;
@@ -138,12 +140,18 @@ export class PassportAuthentication {
       res.send({ authenticated: true });
     });
 
+    // AUTH_PROVIDER: Set to 'sso' to replace the built-in OAuth providers with a single
+    // generic OIDC provider (e.g. VenusVerse SSO). Unset or any other value keeps the
+    // default provider behavior (GitHub/Microsoft when their credentials are present).
+    const authProvider: string = (process.env["AUTH_PROVIDER"] || "").toLowerCase();
+
     // See https://developer.github.com/v3/oauth/ for more information.
     // GITHUB_CLIENT_ID:     The client ID you received from GitHub when registering a developer app.
     // GITHUB_CLIENT_SECRET: The client secret you received from GitHub when registering a developer app.
     const gitHubClientId: string = process.env["GITHUB_CLIENT_ID"];
     const gitHubClientSecret: string = process.env["GITHUB_CLIENT_SECRET"];
-    const isGitHubAuthenticationEnabled: boolean = !!this._serverUrl && !!gitHubClientId && !!gitHubClientSecret;
+    const isGitHubAuthenticationEnabled: boolean =
+      authProvider !== "sso" && !!this._serverUrl && !!gitHubClientId && !!gitHubClientSecret;
 
     if (isGitHubAuthenticationEnabled) {
       this.setupGitHubRoutes(router, gitHubClientId, gitHubClientSecret);
@@ -154,26 +162,58 @@ export class PassportAuthentication {
     // MICROSOFT_CLIENT_SECRET: The client secret you received from Microsoft when registering an app.
     const microsoftClientId: string = process.env["MICROSOFT_CLIENT_ID"];
     const microsoftClientSecret: string = process.env["MICROSOFT_CLIENT_SECRET"];
-    const isMicrosoftAuthenticationEnabled: boolean = !!this._serverUrl && !!microsoftClientId && !!microsoftClientSecret;
+    const isMicrosoftAuthenticationEnabled: boolean =
+      authProvider !== "sso" && !!this._serverUrl && !!microsoftClientId && !!microsoftClientSecret;
 
     if (isMicrosoftAuthenticationEnabled) {
       this.setupMicrosoftRoutes(router, microsoftClientId, microsoftClientSecret);
       this.setupAzureAdRoutes(router, microsoftClientId, microsoftClientSecret);
     }
 
+    // Generic OIDC provider ("sso") for interactive login. Requires the issuer to expose a
+    // standard discovery document and support authorization_code with PKCE S256.
+    // OIDC_ISSUER:        The issuer URL, e.g. https://sso.example.com
+    // OIDC_CLIENT_ID:     The client ID registered at the issuer for this server.
+    // OIDC_CLIENT_SECRET: The client secret registered at the issuer for this server.
+    // OIDC_REDIRECT_URI:  Optional. Defaults to {SERVER_URL}/auth/callback/sso.
+    const oidcIssuer: string = process.env["OIDC_ISSUER"];
+    const oidcClientId: string = process.env["OIDC_CLIENT_ID"];
+    const oidcClientSecret: string = process.env["OIDC_CLIENT_SECRET"];
+    const isSsoAuthenticationEnabled: boolean =
+      authProvider === "sso" && !!this._serverUrl && !!oidcIssuer && !!oidcClientId && !!oidcClientSecret;
+
+    if (isSsoAuthenticationEnabled) {
+      this.setupSsoRoutes(router, oidcIssuer, oidcClientId, oidcClientSecret);
+    }
+
     router.get("/auth/login", this._cookieSessionMiddleware, (req: Request, res: Response): any => {
       req.session["hostname"] = req.query.hostname;
-      res.render("authenticate", { action: "login", isGitHubAuthenticationEnabled, isMicrosoftAuthenticationEnabled });
+      res.render("authenticate", {
+        action: "login",
+        isGitHubAuthenticationEnabled,
+        isMicrosoftAuthenticationEnabled,
+        isSsoAuthenticationEnabled,
+      });
     });
 
     router.get("/auth/link", this._cookieSessionMiddleware, (req: Request, res: Response): any => {
       req.session["authorization"] = req.query.access_token;
-      res.render("authenticate", { action: "link", isGitHubAuthenticationEnabled, isMicrosoftAuthenticationEnabled });
+      res.render("authenticate", {
+        action: "link",
+        isGitHubAuthenticationEnabled,
+        isMicrosoftAuthenticationEnabled,
+        isSsoAuthenticationEnabled,
+      });
     });
 
     router.get("/auth/register", this._cookieSessionMiddleware, (req: Request, res: Response): any => {
       req.session["hostname"] = req.query.hostname;
-      res.render("authenticate", { action: "register", isGitHubAuthenticationEnabled, isMicrosoftAuthenticationEnabled });
+      res.render("authenticate", {
+        action: "register",
+        isGitHubAuthenticationEnabled,
+        isMicrosoftAuthenticationEnabled,
+        isSsoAuthenticationEnabled,
+      });
     });
 
     return router;
@@ -222,6 +262,8 @@ export class PassportAuthentication {
         return account.gitHubId;
       case PassportAuthentication.MICROSOFT_PROVIDER_NAME:
         return account.microsoftId;
+      case PassportAuthentication.SSO_PROVIDER_NAME:
+        return account.ssoId;
       default:
         throw new Error("Unrecognized provider");
     }
@@ -237,6 +279,9 @@ export class PassportAuthentication {
         return;
       case PassportAuthentication.MICROSOFT_PROVIDER_NAME:
         account.microsoftId = id;
+        return;
+      case PassportAuthentication.SSO_PROVIDER_NAME:
+        account.ssoId = id;
         return;
       default:
         throw new Error("Unrecognized provider");
@@ -522,5 +567,47 @@ export class PassportAuthentication {
     );
 
     this.setupCommonRoutes(router, providerName, strategyName);
+  }
+
+  private setupSsoRoutes(router: Router, oidcIssuer: string, oidcClientId: string, oidcClientSecret: string): void {
+    const providerName = PassportAuthentication.SSO_PROVIDER_NAME;
+    const strategyName = "sso";
+    const redirectUri: string = process.env["OIDC_REDIRECT_URI"] || this.getCallbackUrl(providerName);
+
+    Issuer.discover(oidcIssuer)
+      .then((issuer) => {
+        const client = new issuer.Client({
+          client_id: oidcClientId,
+          client_secret: oidcClientSecret,
+          redirect_uris: [redirectUri],
+          response_types: ["code"],
+        });
+
+        passport.use(
+          strategyName,
+          new OpenIdClientStrategy(
+            {
+              client,
+              params: { scope: "openid profile email" },
+              sessionKey: providerName,
+              usePKCE: "S256",
+            },
+            (tokenset: TokenSet, done: (error: any, user?: any) => void): void => {
+              const claims = tokenset.claims();
+
+              done(/*err*/ null, {
+                id: `${providerName}:${claims.sub}`,
+                displayName: claims.name || claims.email,
+                emails: claims.email ? [{ value: claims.email }] : [],
+              });
+            }
+          )
+        );
+
+        this.setupCommonRoutes(router, providerName, strategyName);
+      })
+      .catch((error: Error) => {
+        console.error(`Failed to initialize "${strategyName}" authentication: could not discover OIDC issuer ${oidcIssuer}`, error);
+      });
   }
 }

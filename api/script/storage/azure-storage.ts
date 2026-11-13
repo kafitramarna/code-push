@@ -271,6 +271,7 @@ export class AzureStorage implements storage.Storage {
       azureAdId: updateProperties.azureAdId,
       gitHubId: updateProperties.gitHubId,
       microsoftId: updateProperties.microsoftId,
+      ssoId: updateProperties.ssoId,
     };
 
     return this._setupPromise
@@ -859,7 +860,15 @@ export class AzureStorage implements storage.Storage {
     let tableClient: TableClient;
     let blobServiceClient: BlobServiceClient;
 
-    if (process.env.EMULATED) {
+    if (process.env.AZURE_STORAGE_CONNECTION_STRING) {
+      const connectionString: string = process.env.AZURE_STORAGE_CONNECTION_STRING;
+      // Required for http endpoints such as an Azurite container; no-op for https.
+      const tableClientOptions: any = { allowInsecureConnection: true };
+
+      tableServiceClient = TableServiceClient.fromConnectionString(connectionString, tableClientOptions);
+      tableClient = TableClient.fromConnectionString(connectionString, AzureStorage.TABLE_NAME, tableClientOptions);
+      blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
+    } else if (process.env.EMULATED) {
       if (accountName || accountKey) {
         return Promise.reject("Cannot set accountName or accountKey when using the emulator.");
       }

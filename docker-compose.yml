@@ -1,0 +1,57 @@
+name: code-push
+
+networks:
+  # External network shared with Nginx Proxy Manager (the only public ingress).
+  app-network:
+    external: true
+  # Internal network for api <-> azurite traffic.
+  cp-net:
+    driver: bridge
+
+volumes:
+  cp-storage:
+
+services:
+  api:
+    build: ./api
+    container_name: cp-api
+    env_file: .env
+    networks:
+      - app-network
+      - cp-net
+    ports:
+      # Localhost-only probe port; public traffic enters via Nginx Proxy Manager.
+      - "127.0.0.1:${API_BIND_PORT:-3010}:3000"
+    depends_on:
+      azurite:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    container_name: cp-azurite
+    command:
+      azurite -l /data -d /data/debug.log
+      --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0
+      --skipApiVersionCheck
+    networks:
+      - cp-net
+    expose:
+      - "10000" # Blob
+      - "10001" # Queue
+      - "10002" # Table
+    volumes:
+      - cp-storage:/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000 && nc -z 127.0.0.1 10001 && nc -z 127.0.0.1 10002"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
