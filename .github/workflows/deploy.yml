@@ -1,0 +1,67 @@
+# CI/CD: GitHub Actions → VPS Oracle (Jalur A: build native ARM64 di VPS)
+# Same pattern as oracle/ci-cd/deploy.yml — see that README for secrets setup.
+#
+# Server-side layout:
+#   /opt/apps/code-push/            rsync target (this repo)
+#   /opt/apps/code-push/.env        env secrets (rsync excludes .env)
+#   /usr/local/bin/deploy-app       builds + ups the compose project
+#
+# First deploy: create /opt/apps/code-push/.env on the VPS before the first
+# green run (rsync excludes .env so it survives every deploy).
+
+name: build-test-deploy
+
+on:
+  push:
+    branches: [master]     # auto-deploy ke codepush.<dev-domain>
+  workflow_dispatch: {}
+
+env:
+  VPS_HOST: ${{ secrets.VPS_HOST || '129.225.0.136' }}
+  VPS_USER: ubuntu
+  APP_NAME: code-push
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: api build check
+        working-directory: api
+        run: npm ci && npm run build
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    concurrency: deploy-code-push
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Siapkan kunci SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -t ed25519 "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Kirim sumber ke VPS (rsync)
+        run: |
+          rsync -az --delete \
+            --exclude '.git' --exclude 'node_modules' --exclude '__pycache__' \
+            --exclude '.env' --exclude '*.pem' --exclude '*.key' \
+            --exclude 'bin/' --exclude 'dist/' --exclude 'cli/' \
+            --exclude 'docker-compose.override.yml' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            ./ "$VPS_USER@$VPS_HOST:/opt/apps/$APP_NAME/"
+
+      - name: Build & jalankan di VPS
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" "deploy-app $APP_NAME"
