@@ -13,7 +13,7 @@ name: build-test-deploy
 
 on:
   push:
-    branches: [master]     # auto-deploy ke codepush.<dev-domain>
+    branches: [master-dev]  # auto-deploy ke codepush.<dev-domain>; master = prod nanti
   workflow_dispatch: {}
 
 env:
