@@ -140,6 +140,19 @@ export function start(done: (err?: any, server?: express.Express, storage?: Stor
       app.set("views", __dirname + "/views");
       app.set("view engine", "ejs");
       app.use("/auth/images/", express.static(__dirname + "/views/images"));
+
+      // Management dashboard SPA — built by the Dockerfile's dashboard stage
+      // into bin/script/dashboard. The SPA handles its own auth (access key in
+      // the URL fragment), so it must be reachable without a bearer token.
+      app.use("/dashboard", express.static(__dirname + "/dashboard"));
+      app.get("/dashboard/*", (req: express.Request, res: express.Response, next: (err?: any) => void): any => {
+        if (req.method !== "GET") {
+          next();
+          return;
+        }
+        res.sendFile(__dirname + "/dashboard/index.html");
+      });
+
       app.use(api.headers({ origin: process.env.CORS_ORIGIN || "http://localhost:4000" }));
       app.use(api.health({ storage: storage, redisManager: redisManager }));
 

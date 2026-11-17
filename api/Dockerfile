@@ -1,3 +1,11 @@
+# Dashboard stage: build the management SPA into static assets
+FROM node:22-bookworm-slim AS dashboard
+WORKDIR /dash
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY dashboard/ ./
+RUN npm run build
+
 # Build stage: install all dependencies and compile TypeScript
 FROM node:22-bookworm-slim AS build
 WORKDIR /app
@@ -21,6 +29,7 @@ RUN apt-get update \
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/bin ./bin
+COPY --from=dashboard /dash/dist ./bin/script/dashboard
 
 EXPOSE 3000
 CMD ["node", "bin/script/server.js"]

@@ -188,6 +188,7 @@ export class PassportAuthentication {
 
     router.get("/auth/login", this._cookieSessionMiddleware, (req: Request, res: Response): any => {
       req.session["hostname"] = req.query.hostname;
+      req.session["audience"] = req.query.for;
       res.render("authenticate", {
         action: "login",
         isGitHubAuthenticationEnabled,
@@ -214,6 +215,21 @@ export class PassportAuthentication {
         isMicrosoftAuthenticationEnabled,
         isSsoAuthenticationEnabled,
       });
+    });
+
+    // Browser dashboard entry: skips the provider picker and goes straight to
+    // SSO when it is the only provider, otherwise falls back to /auth/login.
+    // The issued access key is delivered to /dashboard/#key= via "audience".
+    router.get("/auth/dashboard", this._cookieSessionMiddleware, (req: Request, res: Response, next: (err?: any) => void): any => {
+      req.session["action"] = "login";
+      req.session["audience"] = "dashboard";
+
+      if (isSsoAuthenticationEnabled) {
+        passport.authenticate("sso", { session: false })(req, res, next);
+        return;
+      }
+
+      res.redirect("/auth/login?for=dashboard");
     });
 
     return router;
@@ -373,6 +389,15 @@ export class PassportAuthentication {
 
           this._storageInstance.addAccessKey(accountId, accessKey).then((accessKeyId: string): void => {
             const key: string = accessKey.name;
+
+            // Dashboard audience: hand the key to the SPA via fragment (never
+            // logged or sent to the server) instead of the CLI accesskey page.
+            if (req.session["audience"] === "dashboard") {
+              req.session = null;
+              res.redirect("/dashboard/#key=" + encodeURIComponent(key));
+              return;
+            }
+
             req.session["accessKey"] = key;
             req.session["isNewAccount"] = action === "register";
 
