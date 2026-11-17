@@ -53,3 +53,4 @@ __queuestorage__
 
 # dashboard build output
 api/dashboard/dist/
+api/dashboard/tsconfig.tsbuildinfo
