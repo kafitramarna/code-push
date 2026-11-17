@@ -37,7 +37,8 @@ export default function KeysPage() {
     if (!deleting) return;
     setBusy(true);
     try {
-      await deleteAccessKey(deleting.name);
+      // GET /accessKeys masks `name`; friendlyName is the usable identifier.
+      await deleteAccessKey(deleting.friendlyName ?? deleting.name);
       setDeleting(null);
       void load();
     } catch (err) {
@@ -46,6 +47,26 @@ export default function KeysPage() {
       setBusy(false);
     }
   }
+
+  const named = keys?.filter((k) => !k.isSession) ?? [];
+  const sessions = keys?.filter((k) => k.isSession) ?? [];
+
+  const row = (k: AccessKey) => (
+    <tr key={k.friendlyName ?? k.name}>
+      <td>
+        {k.friendlyName ?? "(unnamed)"}
+        {k.isSession && <span className="badge accent">session</span>}
+      </td>
+      <td className="muted">{fmtDate(k.createdTime)}</td>
+      <td className="muted">{fmtDate(k.expires)}</td>
+      <td className="muted">{k.createdBy ?? "—"}</td>
+      <td>
+        <button className="btn sm danger" onClick={() => setDeleting(k)}>
+          Delete
+        </button>
+      </td>
+    </tr>
+  );
 
   return (
     <>
@@ -74,37 +95,61 @@ export default function KeysPage() {
           <Empty>No access keys.</Empty>
         </div>
       ) : (
-        <div className="panel">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Created</th>
-                <th>Expires</th>
-                <th>By</th>
-                <th style={{ width: 90 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map((k) => (
-                <tr key={k.name}>
-                  <td>
-                    {k.friendlyName ?? k.name}
-                    {k.isSession && <span className="badge accent">session</span>}
-                  </td>
-                  <td className="muted">{fmtDate(k.createdTime)}</td>
-                  <td className="muted">{fmtDate(k.expires)}</td>
-                  <td className="muted">{k.createdBy ?? "—"}</td>
-                  <td>
-                    <button className="btn sm danger" onClick={() => setDeleting(k)}>
-                      Delete
-                    </button>
-                  </td>
+        <>
+          <div className="panel mb">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Created</th>
+                  <th>Expires</th>
+                  <th>By</th>
+                  <th style={{ width: 90 }} />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {named.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="muted">
+                      No named keys — sessions only.
+                    </td>
+                  </tr>
+                ) : (
+                  named.map(row)
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <h2 style={{ fontSize: 15, margin: "24px 0 8px" }}>Login sessions</h2>
+          <div className="muted mb" style={{ fontSize: 12.5 }}>
+            Keys minted by CLI and dashboard sign-ins — deleting one signs that session out.
+          </div>
+          <div className="panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Created</th>
+                  <th>Expires</th>
+                  <th>By</th>
+                  <th style={{ width: 90 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="muted">
+                      No sessions.
+                    </td>
+                  </tr>
+                ) : (
+                  sessions.map(row)
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {creating && (
