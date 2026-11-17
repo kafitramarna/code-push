@@ -31,9 +31,23 @@ export function login() {
   window.location.href = "/auth/dashboard";
 }
 
-export function logout() {
+/**
+ * Signs out of the dashboard: revokes the session access key server-side so
+ * the leaked/discarded token can't be reused, then returns to the landing
+ * page. The VenusVerse SSO session itself stays alive — the next sign-in is
+ * one click, matching how every other app in the ecosystem behaves.
+ */
+export async function logout() {
+  const t = tokenStore.token;
   tokenStore.token = null;
-  login();
+  if (t) {
+    // Plain fetch — must not trip the 401 interceptor into a re-login.
+    await fetch(`/accessKeys/${encodeURIComponent(t)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${t}` },
+    }).catch(() => {});
+  }
+  window.location.href = "/dashboard/";
 }
 
 /** Reads #key= from the URL fragment once, stores it, and cleans the URL. */
